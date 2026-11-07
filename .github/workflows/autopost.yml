@@ -1,7 +1,6 @@
 name: autopost
 on:
-  schedule:
-    - cron: "*/30 * * * *"
+  # Facebook route is ON HOLD (no admin access to the page). Re-add a `schedule:` here once FB_PAGE_ID / FB_PAGE_TOKEN exist.
   workflow_dispatch:
     inputs:
       dry_run:

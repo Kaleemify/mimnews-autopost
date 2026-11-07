@@ -57,8 +57,9 @@ def retry(fn, tries=4):
     """Hosts (Hostinger, Facebook) sometimes reset a connection once; try again with a pause."""
     for i in range(tries):
         try: return fn()
-        except (requests.ConnectionError, requests.Timeout):
+        except (requests.ConnectionError, requests.Timeout) as e:
             if i == tries - 1: raise
+            log(f"   (network hiccup: {type(e).__name__}; retry {i + 1}/{tries - 1})")
             time.sleep(4 * (i + 1))
 
 def mim(path, payload, timeout=120):
