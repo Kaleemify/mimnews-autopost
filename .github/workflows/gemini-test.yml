@@ -17,15 +17,12 @@ jobs:
           python3 - <<'PY'
           import os, json, urllib.request, urllib.error
           key = os.environ.get("GEMINI_API_KEY", "")
-          model = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
-          print("key present:", bool(key), "| length:", len(key), "| model:", model)
-          body = {"contents": [{"parts": [{"text": "Write one short Pinglish (Roman Urdu) news headline about rain in Karachi. Reply with the headline only."}]}]}
-          req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key})
+          print("key present:", bool(key), "| length:", len(key))
+          req = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", headers={"x-goog-api-key": key})
           try:
-              r = urllib.request.urlopen(req, timeout=60); j = json.load(r)
-              print("HTTP", r.status); print("ANSWER:", j["candidates"][0]["content"]["parts"][0]["text"].strip()[:200])
+              j = json.load(urllib.request.urlopen(req, timeout=60))
           except urllib.error.HTTPError as e:
-              msg = e.read().decode()[:400]
-              print("HTTP", e.code, "->", msg.replace(key, "<key>") if key else msg)
-              raise SystemExit(1)
+              print("LIST HTTP", e.code, e.read().decode()[:300].replace(key, "<key>")); raise SystemExit(1)
+          names = [m["name"].split("/")[-1] for m in j.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])]
+          print("MODELS:", " ".join(sorted(n for n in names if "flash" in n or "pro" in n)))
           PY
