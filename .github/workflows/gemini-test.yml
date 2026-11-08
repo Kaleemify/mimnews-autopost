@@ -17,12 +17,16 @@ jobs:
           python3 - <<'PY'
           import os, json, urllib.request, urllib.error
           key = os.environ.get("GEMINI_API_KEY", "")
-          print("key present:", bool(key), "| length:", len(key))
-          req = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", headers={"x-goog-api-key": key})
-          try:
-              j = json.load(urllib.request.urlopen(req, timeout=60))
-          except urllib.error.HTTPError as e:
-              print("LIST HTTP", e.code, e.read().decode()[:300].replace(key, "<key>")); raise SystemExit(1)
-          names = [m["name"].split("/")[-1] for m in j.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])]
-          print("MODELS:", " ".join(sorted(n for n in names if "flash" in n or "pro" in n)))
+          prompt = ("Rewrite as a short Pinglish (Roman Urdu) news item. Use ONLY these facts. Return JSON {\"title\":..., \"paragraphs\":[...]}. "
+                    "Facts: Sindh Education Minister Syed Sardar Shah said schools will reopen as scheduled and the holiday-extension notification on social media is fake.")
+          for model in ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash"]:
+              body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
+              req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key})
+              try:
+                  r = urllib.request.urlopen(req, timeout=90); j = json.load(r)
+                  print("MODEL", model, "-> HTTP", r.status); print("ANSWER:", j["candidates"][0]["content"]["parts"][0]["text"].strip()[:500]); break
+              except urllib.error.HTTPError as e:
+                  m = e.read().decode().replace("
+", " ").replace(key, "<key>")
+                  print("MODEL", model, "-> HTTP", e.code, m[:300])
           PY
