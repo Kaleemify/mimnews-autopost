@@ -14,7 +14,7 @@ Environment (GitHub Secrets / variables):
   MIM_KEY                     shared key for the website endpoint (required)
   MIM_URL                     default https://mimnews.com
   GEMINI_API_KEY              optional; without it items are saved as DRAFT with the raw caption/transcript
-  GEMINI_MODEL                default gemini-2.5-flash
+  GEMINI_MODEL                optional; default tries gemini-flash-lite-latest, gemini-flash-latest, gemini-3.5-flash-lite, gemini-3.5-flash
   WHISPER_MODEL               default small      WHISPER_LANG  optional (e.g. ur); empty = auto-detect
   WINDOW_HOURS                default 24   only posts newer than this are published; older unseen ones are ignored
   MAX_PER_RUN                 default 3
@@ -36,7 +36,7 @@ def env(k, d=""):
 
 FB_PAGE_ID = env("FB_PAGE_ID"); FB_TOKEN = env("FB_PAGE_TOKEN")
 MIM_KEY = env("MIM_KEY"); MIM_URL = env("MIM_URL", "https://mimnews.com").rstrip("/")
-GEMINI_KEY = env("GEMINI_API_KEY"); GEMINI_MODEL = env("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_KEY = env("GEMINI_API_KEY"); GEMINI_MODEL = env("GEMINI_MODEL", "")
 WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG")
 WINDOW_HOURS = float(env("WINDOW_HOURS", "24")); MAX_PER_RUN = int(env("MAX_PER_RUN", "3"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
@@ -150,17 +150,25 @@ def gemini_write(caption, transcript, lang):
     if not GEMINI_KEY: return None
     body = {"contents": [{"parts": [{"text": PROMPT.format(cats=", ".join(CATS), caption=caption or "(none)", transcript=(transcript or "(none)")[:12000], lang=lang or "unknown")}]}],
             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
-    url = f"{env('GEMINI_BASE', 'https://generativelanguage.googleapis.com/v1beta')}/models/{GEMINI_MODEL}:generateContent"
-    for attempt in range(4):
-        r = requests.post(url, params={"key": GEMINI_KEY}, json=body, timeout=90)
-        if r.status_code in (429, 500, 503): time.sleep(8 * (attempt + 1)); continue
-        r.raise_for_status()
-        try:
-            txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(txt)
-        except Exception as e:
-            log("   gemini: unreadable answer:", type(e).__name__); return None
-    log("   gemini: rate limited / unavailable"); return None
+    base = env('GEMINI_BASE', 'https://generativelanguage.googleapis.com/v1beta')
+    # Model names are retired from time to time (gemini-2.5-* is closed to new keys). Try the configured one first, then the "latest" aliases.
+    models = [m for m in dict.fromkeys([GEMINI_MODEL, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]) if m]
+    for model in models:
+        url = f"{base}/models/{model}:generateContent"
+        for attempt in range(3):
+            try:
+                r = requests.post(url, headers={"x-goog-api-key": GEMINI_KEY}, json=body, timeout=60)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                log(f"   gemini {model}: {type(e).__name__}"); time.sleep(5); continue
+            if r.status_code in (404, 400, 403): log(f"   gemini {model}: HTTP {r.status_code} (not usable), trying next"); break
+            if r.status_code in (429, 500, 503): time.sleep(8 * (attempt + 1)); continue
+            r.raise_for_status()
+            try:
+                txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                return json.loads(txt)
+            except Exception as e:
+                log(f"   gemini {model}: unreadable answer ({type(e).__name__}), trying next"); break
+    log("   gemini: no model answered (rate limited / unavailable)"); return None
 
 def fallback_item(caption, transcript):
     """No LLM: raw material, ALWAYS saved as draft."""
