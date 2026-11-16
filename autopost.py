@@ -121,8 +121,12 @@ def transcribe(video):
     from faster_whisper import WhisperModel
     if _whisper is None: _whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
     wav = video + ".wav"
-    run(["ffmpeg", "-y", "-i", video, "-vn", "-ac", "1", "-ar", "16000", wav])
-    segs, info = _whisper.transcribe(wav, language=WHISPER_LANG or None, vad_filter=True, beam_size=5)
+    run(["ffmpeg", "-y", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", wav])
+    # Decode the 16 kHz mono wav ourselves: faster-whisper's own file reader (PyAV) breaks on some version combinations.
+    import wave, numpy as np
+    with wave.open(wav, "rb") as w:
+        audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+    segs, info = _whisper.transcribe(audio, language=WHISPER_LANG or None, vad_filter=True, beam_size=5)
     text = " ".join(s.text.strip() for s in segs).strip()
     return text, info.language, float(getattr(info, "language_probability", 0) or 0)
 
@@ -232,7 +236,8 @@ def process(p):
                     log(f"   transcript: {len(transcript)} chars, language={lang} ({prob:.2f})")
                     if not image_url and d: image_b64 = frame_b64(path, d * 0.15)
         except Exception as e:
-            log("   video step failed:", safe_err(e)); status = "draft"
+            # Do not create a half-made post (no transcript) and do not mark it as handled: it is retried on the next run.
+            log("   video step failed:", safe_err(e), "-> skipped, will retry next run"); return
     if DRY: log("   [dry] would write + publish"); return
     item = None
     try: item = gemini_write(caption, transcript, lang)
