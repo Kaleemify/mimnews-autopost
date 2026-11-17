@@ -176,8 +176,45 @@ def gemini_write(caption, transcript, lang):
             again = _gemini_call(caption, transcript, lang, "\n\nYour previous answer contained words in Urdu script: " + ", ".join(words) + ". Rewrite the WHOLE item again using Latin letters only.")
             if not again or again.get("skip"): break
             item = again; text = " ".join([str(item.get("title", ""))] + [str(x) for x in item.get("paragraphs", [])])
-        if ARABIC.search(text): item["_urdu_script"] = True
+        if ARABIC.search(text):                       # last resort: transliterate only the leftover words (names etc.)
+            fixed = _transliterate_leftovers(item)
+            text = " ".join([str(fixed.get("title", ""))] + [str(x) for x in fixed.get("paragraphs", [])])
+            item = fixed
+            if ARABIC.search(text): item["_urdu_script"] = True
     return item
+
+def _gemini_json(prompt):
+    """One small JSON call, same model fallback list as the news writer."""
+    if not GEMINI_KEY: return None
+    base = env('GEMINI_BASE', 'https://generativelanguage.googleapis.com/v1beta')
+    models = [m for m in dict.fromkeys([GEMINI_MODEL, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]) if m]
+    body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}
+    for model in models:
+        for attempt in range(3):
+            try: r = requests.post(f"{base}/models/{model}:generateContent", headers={"x-goog-api-key": GEMINI_KEY}, json=body, timeout=60)
+            except (requests.ConnectionError, requests.Timeout): time.sleep(5); continue
+            if r.status_code in (404, 400, 403): break
+            if r.status_code in (429, 500, 503): time.sleep(8 * (attempt + 1)); continue
+            try: return json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+            except Exception: break
+    return None
+
+def _transliterate_leftovers(item):
+    texts = [str(item.get("title", ""))] + [str(x) for x in item.get("paragraphs", [])]
+    words = sorted({w for t in texts for w in t.split() if ARABIC.search(w)})
+    if not words: return item
+    log(f"   transliterating {len(words)} leftover Urdu-script word(s)")
+    prompt = ("Transliterate each of these Urdu/Arabic-script words or phrases into Roman Urdu (Latin letters only, Pakistani newsroom spelling, "
+              "capitalise names). Keep any punctuation attached to a word. Return ONLY a JSON object that maps each input string exactly to its Latin-letter version.\n"
+              + json.dumps(words, ensure_ascii=False))
+    mp = _gemini_json(prompt)
+    if not isinstance(mp, dict): return item
+    def fix(t):
+        for w in sorted(mp, key=len, reverse=True):
+            if isinstance(mp[w], str) and mp[w] and not ARABIC.search(mp[w]): t = t.replace(w, mp[w])
+        return t
+    out = dict(item); out["title"] = fix(texts[0]); out["paragraphs"] = [fix(t) for t in texts[1:]]
+    return out
 
 def _gemini_call(caption, transcript, lang, extra):
     if not GEMINI_KEY: return None
