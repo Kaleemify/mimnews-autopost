@@ -38,7 +38,7 @@ FB_PAGE_ID = env("FB_PAGE_ID"); FB_TOKEN = env("FB_PAGE_TOKEN")
 MIM_KEY = env("MIM_KEY"); MIM_URL = env("MIM_URL", "https://mimnews.com").rstrip("/")
 GEMINI_KEY = env("GEMINI_API_KEY"); GEMINI_MODEL = env("GEMINI_MODEL", "")
 WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG")
-WINDOW_HOURS = float(env("WINDOW_HOURS", "24")); MAX_PER_RUN = int(env("MAX_PER_RUN", "3"))
+WINDOW_HOURS = float(env("WINDOW_HOURS", "24")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
 DRY = env("DRY_RUN") == "1"
 
@@ -217,6 +217,12 @@ def new_posts():
 def process(p):
     pid = p["id"]; kind, vid = post_kind(p); caption = (p.get("message") or "").strip()
     log(f"- {pid} [{kind}] {caption[:70]!r}")
+    # Election-campaign posts are not news; skip them before spending download/transcribe minutes on them.
+    low = caption.lower()
+    if any(k in low for k in ("vote & support", "vote and support", "vote &amp; support", "candidate for")) or any(k in caption for k in ("ووٹ اینڈ سپورٹ", "امیدوار برائے")):
+        log("   campaign post, ignored")
+        if not DRY: mim("ignore", {"ids": [pid]})
+        return
     if kind == "text" and len(caption) < MIN_TEXT:
         log("   too short, ignored");
         if not DRY: mim("ignore", {"ids": [pid]})
