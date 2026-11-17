@@ -264,6 +264,8 @@ def new_posts():
     feed = fetch_feed()
     ids = [p["id"] for p in feed]
     if not ids: return [], True
+    if env("REDO_DRAFTS") == "1" and not DRY:
+        _, dj = mim("redo-drafts", {}); log(f"redo: trashed {len(dj.get('trashed', []))} unfinished autopost draft(s); they will be rebuilt below")
     if env("BACKFILL") == "1" and not DRY:
         _, uj = mim("unignore", {"all": True}); log(f"backfill: forgot {uj.get('cleared')} ignored ids, looking at them again")
     code, j = mim("seen", {"ids": ids})

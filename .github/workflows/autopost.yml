@@ -12,6 +12,10 @@ on:
         description: "Backfill: re-check posts that were ignored before"
         type: boolean
         default: false
+      redo_drafts:
+        description: "Trash unfinished autopost drafts so they are rebuilt properly"
+        type: boolean
+        default: false
       max_posts:
         description: "Posts to handle in this run (empty = 8)"
         type: string
@@ -36,6 +40,7 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
       BACKFILL: ${{ inputs.backfill && '1' || '' }}
       MAX_PER_RUN: ${{ inputs.max_posts }}
+      REDO_DRAFTS: ${{ inputs.redo_drafts && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check for new Facebook posts (cheap)
