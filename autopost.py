@@ -63,7 +63,11 @@ def retry(fn, tries=4):
             time.sleep(4 * (i + 1))
 
 def mim(path, payload, timeout=120):
-    r = retry(lambda: requests.post(f"{MIM_URL}/wp-json/mim/v1/autopost/{path}", json=payload, headers={"X-MIM-Key": MIM_KEY, "User-Agent": "mim-autopost/1.0"}, timeout=timeout))
+    for attempt in range(4):
+        r = retry(lambda: requests.post(f"{MIM_URL}/wp-json/mim/v1/autopost/{path}", json=payload, headers={"X-MIM-Key": MIM_KEY, "User-Agent": "mim-autopost/1.0"}, timeout=timeout))
+        if r.status_code in (502, 503, 504, 520, 521, 522, 523, 524) and attempt < 3:
+            log(f"   (website busy: HTTP {r.status_code}; retry {attempt + 1}/3)"); time.sleep(10 * (attempt + 1)); continue
+        break
     if r.status_code in (423, 429): return r.status_code, r.json()
     r.raise_for_status(); return r.status_code, r.json()
 
@@ -270,7 +274,9 @@ def main():
     except Exception as e: log("check failed:", safe_err(e)); sys.exit(1)
     work = bool(fresh) and enabled
     if "--check" in sys.argv:
-        log(f"new posts: {len(fresh)}"); out = os.environ.get("GITHUB_OUTPUT")
+        log(f"new posts: {len(fresh)}")
+        for p in fresh: log(f"   queue: [{post_kind(p)[0]}] {(p.get('message') or '').strip()[:70]!r} ({p['created_time'][:16]})")
+        out = os.environ.get("GITHUB_OUTPUT")
         if out:
             with open(out, "a") as f: f.write(f"work={'true' if work else 'false'}\n")
         return
