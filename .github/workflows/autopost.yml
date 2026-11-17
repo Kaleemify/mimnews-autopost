@@ -12,6 +12,10 @@ on:
         description: "Backfill: re-check posts that were ignored before"
         type: boolean
         default: false
+      max_posts:
+        description: "Posts to handle in this run (empty = 8)"
+        type: string
+        default: ""
 concurrency:
   group: autopost
   cancel-in-progress: false
@@ -31,6 +35,7 @@ jobs:
       WHISPER_LANG: ${{ vars.WHISPER_LANG }}
       DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
       BACKFILL: ${{ inputs.backfill && '1' || '' }}
+      MAX_PER_RUN: ${{ inputs.max_posts }}
     steps:
       - uses: actions/checkout@v4
       - name: Check for new Facebook posts (cheap)
