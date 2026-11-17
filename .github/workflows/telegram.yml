@@ -1,7 +1,6 @@
 name: telegram-desk
 on:
-  schedule:
-    - cron: "*/30 * * * *"
+  # Telegram desk is not set up (no bot token yet); schedule switched off so it does not waste free minutes. Re-add when TG_BOT_TOKEN exists.
   workflow_dispatch:
 concurrency:
   group: telegram-desk
