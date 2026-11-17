@@ -16,7 +16,7 @@ Environment (GitHub Secrets / variables):
   GEMINI_API_KEY              optional; without it items are saved as DRAFT with the raw caption/transcript
   GEMINI_MODEL                optional; default tries gemini-flash-lite-latest, gemini-flash-latest, gemini-3.5-flash-lite, gemini-3.5-flash
   WHISPER_MODEL               default small      WHISPER_LANG  optional (e.g. ur); empty = auto-detect
-  WINDOW_HOURS                default 24   only posts newer than this are published; older unseen ones are ignored
+  WINDOW_HOURS                default 48   only posts newer than this are published; older unseen ones are ignored
   MAX_PER_RUN                 default 3
   MAX_VIDEO_MIN               default 15   longer videos: no transcript (caption only)
   MIN_TEXT_CHARS              default 30   text-only posts shorter than this are ignored
@@ -38,7 +38,7 @@ FB_PAGE_ID = env("FB_PAGE_ID"); FB_TOKEN = env("FB_PAGE_TOKEN")
 MIM_KEY = env("MIM_KEY"); MIM_URL = env("MIM_URL", "https://mimnews.com").rstrip("/")
 GEMINI_KEY = env("GEMINI_API_KEY"); GEMINI_MODEL = env("GEMINI_MODEL", "")
 WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG")
-WINDOW_HOURS = float(env("WINDOW_HOURS", "24")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
+WINDOW_HOURS = float(env("WINDOW_HOURS", "48")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
 DRY = env("DRY_RUN") == "1"
 
@@ -80,7 +80,14 @@ def fb_get(path, **params):
 def fetch_feed():
     fields = ("id,message,created_time,permalink_url,full_picture,status_type,"
               "attachments{media_type,type,target{id},media{image{src}},subattachments{media_type,target{id},media{image{src}}}}")
-    return fb_get(f"{FB_PAGE_ID}/published_posts", fields=fields, limit=20).get("data", [])
+    out, j = [], fb_get(f"{FB_PAGE_ID}/published_posts", fields=fields, limit=50)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=WINDOW_HOURS)
+    for _ in range(4):                                   # up to 200 posts
+        data = j.get("data", []); out += data
+        nxt = (j.get("paging") or {}).get("next")
+        if not data or not nxt or parse_time(data[-1]["created_time"]) < cutoff: break
+        r = retry(lambda: requests.get(nxt, timeout=60)); r.raise_for_status(); j = r.json()
+    return out
 
 def post_kind(p):
     atts = (p.get("attachments") or {}).get("data") or []
@@ -220,6 +227,8 @@ def new_posts():
     feed = fetch_feed()
     ids = [p["id"] for p in feed]
     if not ids: return [], True
+    if env("BACKFILL") == "1" and not DRY:
+        _, uj = mim("unignore", {"all": True}); log(f"backfill: forgot {uj.get('cleared')} ignored ids, looking at them again")
     code, j = mim("seen", {"ids": ids})
     if not j.get("enabled", True): log("website says autopost is switched off"); return [], False
     seen = set(j.get("seen", []))
@@ -277,7 +286,7 @@ def process(p):
         item = fallback_item(caption, transcript); status = "draft"; log("   using raw text (no/failed AI) -> DRAFT")
     if kind == "video" and not transcript and not caption: log("   nothing to write from -> ignored"); mim("ignore", {"ids": [pid]}); return
     if env("FORCE_STATUS") == "draft": status = "draft"   # testing only
-    payload = {"fb_id": pid, "fb_url": p.get("permalink_url") or "", "title": item["title"], "paragraphs": item["paragraphs"],
+    payload = {"fb_id": pid, "fb_url": p.get("permalink_url") or "", "date": p.get("created_time") or "", "title": item["title"], "paragraphs": item["paragraphs"],
                "category": item.get("category", "blog"), "status": status, "is_video": kind == "video"}
     if image_b64: payload["image_b64"] = image_b64
     elif image_url: payload["image_url"] = image_url

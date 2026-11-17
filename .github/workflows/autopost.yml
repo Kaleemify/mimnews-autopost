@@ -8,6 +8,10 @@ on:
         description: "Dry run (publish nothing)"
         type: boolean
         default: false
+      backfill:
+        description: "Backfill: re-check posts that were ignored before"
+        type: boolean
+        default: false
 concurrency:
   group: autopost
   cancel-in-progress: false
@@ -26,6 +30,7 @@ jobs:
       WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
       WHISPER_LANG: ${{ vars.WHISPER_LANG }}
       DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+      BACKFILL: ${{ inputs.backfill && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check for new Facebook posts (cheap)
