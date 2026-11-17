@@ -139,6 +139,7 @@ PROMPT = """You are the desk editor of MIM News, a Pakistani news website. Write
 
 RULES (strict):
 - Language: Pinglish = Roman Urdu in English letters, the way Pakistani newsrooms type it (e.g. "Karachi mein aaj ...", "wazir-e-azam ne kaha ke ..."). Names, places, numbers, dates must stay exactly as in the material.
+- Write EVERYTHING in English (Latin) letters. Never output any Urdu/Arabic-script character, not even a single word such as police or discount in Urdu script. Transliterate every word.
 - Use ONLY facts that appear in the material. Do NOT add details, quotes, causes, or numbers that are not there. If something is unclear, leave it out.
 - No clickbait, no opinion, no emojis, no hashtags. Neutral news tone. Attribute claims ("... ke mutabiq", "... ne kaha").
 - "title": 8 to 22 words, plain headline, no quotes around it.
@@ -154,9 +155,26 @@ VIDEO TRANSCRIPT (auto-generated, may contain mistakes; language: {lang}):
 {transcript}
 """
 
+ARABIC = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
+
 def gemini_write(caption, transcript, lang):
+    item = _gemini_call(caption, transcript, lang, "")
+    if item and not item.get("skip"):
+        text = " ".join([str(item.get("title", ""))] + [str(x) for x in item.get("paragraphs", [])])
+        for attempt in range(2):                      # one or two corrective retries if Urdu script slipped in
+            bad = ARABIC.findall(text)
+            if not bad: break
+            words = sorted(set(re.findall(r"\S*[؀-ۿ]\S*", text)))[:8]
+            log(f"   gemini used Urdu script ({len(bad)} chars): retrying in Roman letters")
+            again = _gemini_call(caption, transcript, lang, "\n\nYour previous answer contained words in Urdu script: " + ", ".join(words) + ". Rewrite the WHOLE item again using Latin letters only.")
+            if not again or again.get("skip"): break
+            item = again; text = " ".join([str(item.get("title", ""))] + [str(x) for x in item.get("paragraphs", [])])
+        if ARABIC.search(text): item["_urdu_script"] = True
+    return item
+
+def _gemini_call(caption, transcript, lang, extra):
     if not GEMINI_KEY: return None
-    body = {"contents": [{"parts": [{"text": PROMPT.format(cats=", ".join(CATS), caption=caption or "(none)", transcript=(transcript or "(none)")[:12000], lang=lang or "unknown")}]}],
+    body = {"contents": [{"parts": [{"text": PROMPT.format(cats=", ".join(CATS), caption=caption or "(none)", transcript=(transcript or "(none)")[:12000], lang=lang or "unknown") + extra}]}],
             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
     base = env('GEMINI_BASE', 'https://generativelanguage.googleapis.com/v1beta')
     # Model names are retired from time to time (gemini-2.5-* is closed to new keys). Try the configured one first, then the "latest" aliases.
@@ -191,6 +209,7 @@ def fallback_item(caption, transcript):
 def quality_ok(item):
     if not item or item.get("skip"): return False
     t = (item.get("title") or "").strip(); ps = [p for p in (item.get("paragraphs") or []) if isinstance(p, str) and p.strip()]
+    if item.get("_urdu_script"): return False
     if not (15 <= len(t) <= 170): return False
     if not ps or sum(len(p) for p in ps) < 120: return False
     if item.get("category") not in CATS: item["category"] = "blog"
