@@ -309,8 +309,13 @@ def process(p):
                 with tempfile.TemporaryDirectory() as td:
                     path = os.path.join(td, "v.mp4"); mb = download(src, path) / 1048576
                     d = duration(path) or length; log(f"   downloaded {mb:.1f} MB, {d:.0f}s; transcribing ({WHISPER_MODEL})")
-                    transcript, lang, prob = transcribe(path)
-                    log(f"   transcript: {len(transcript)} chars, language={lang} ({prob:.2f})")
+                    try:
+                        transcript, lang, prob = transcribe(path)
+                        log(f"   transcript: {len(transcript)} chars, language={lang} ({prob:.2f})")
+                    except subprocess.CalledProcessError:
+                        # ffmpeg could not take any audio out of this file (e.g. a silent video with no audio track).
+                        # That never fixes itself, so do not retry for ever: write the item from the caption + cover only.
+                        log("   video has no usable audio -> no transcript, using the caption only")
                     if not image_url and d: image_b64 = frame_b64(path, d * 0.15)
         except Exception as e:
             # Do not create a half-made post (no transcript) and do not mark it as handled: it is retried on the next run.
