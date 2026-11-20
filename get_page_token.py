@@ -10,6 +10,7 @@ import getpass, subprocess, sys
 import requests
 
 G = "https://graph.facebook.com/v21.0"
+REPO = "Kaleemify/mimnews-autopost"   # always this repo, whatever folder the script is started from
 
 def die(msg): print("ERROR:", msg); sys.exit(1)
 
@@ -22,7 +23,7 @@ def get(path, **p):
     return r.json()
 
 def gh_secret(name, value):
-    r = subprocess.run(["gh", "secret", "set", name], input=value, text=True, capture_output=True)
+    r = subprocess.run(["gh", "secret", "set", name, "-R", REPO], input=value, text=True, capture_output=True)
     if r.returncode != 0: die(f"could not store {name}: {r.stderr.strip()[:200]}")
     print(f"  stored secret {name}")
 
