@@ -11,6 +11,7 @@ Backups of that chain: GitHub's own timer (`autopost.yml` schedule) and the **wa
 Open **https://mimnews.com/wp-json/mim/v1/health**
 - `"ok": true` (HTTP 200) = a run reached the site within the last 45 minutes. Everything in the chain is alive.
 - HTTP **503** = no run for 45+ minutes, or the site switch is off. Go to section 3.
+- `alarm_job_last_ping_min_ago` = minutes since the cron-job.org alarm job last called this address (it recognises cron-job.org by its user agent). `null` = that job was never created or has never run; a number above ~15 = the alarm job stopped.
 - `autopost_drafts_waiting` = items the writer could not finish (they wait as drafts in WordPress for a person to fix or trash).
 - A second cron-job.org job that calls this address every 10 minutes and e-mails on failure is the outside alarm (see AUTOTRIGGER.md, "Alarm job").
 
