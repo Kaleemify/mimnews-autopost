@@ -41,6 +41,7 @@ WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG"
 WINDOW_HOURS = float(env("WINDOW_HOURS", "48")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
 VIDEO_RETRY_HOURS = float(env("VIDEO_RETRY_HOURS", "3"))   # a post whose video keeps failing is retried for this long, then written from the caption
+GEMINI_RETRY_HOURS = float(env("GEMINI_RETRY_HOURS", "6")) # if no Gemini model answers at all, the post is retried for this long, then saved as a raw-text draft
 DRY = env("DRY_RUN") == "1"
 
 def log(*a): print(*a, flush=True)
@@ -102,6 +103,10 @@ def post_kind(p):
 
 def parse_time(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S%z").astimezone(timezone.utc)
+
+def age_hours(p):
+    """How old a Facebook post is, in hours (0 if the time is unknown)."""
+    return (datetime.now(timezone.utc) - parse_time(p["created_time"])).total_seconds() / 3600 if p.get("created_time") else 0.0
 
 # -------------------------------------------------------------------- media
 def run(cmd, **kw):
@@ -223,7 +228,10 @@ def _gemini_call(caption, transcript, lang, extra):
             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
     base = env('GEMINI_BASE', 'https://generativelanguage.googleapis.com/v1beta')
     # Model names are retired from time to time (gemini-2.5-* is closed to new keys). Try the configured one first, then the "latest" aliases.
-    models = [m for m in dict.fromkeys([GEMINI_MODEL, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]) if m]
+    # The first attempt uses the cheap "lite" model; a corrective retry (the answer still had Urdu letters) goes to the stronger models first.
+    order = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
+    if extra: order = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.5-flash-lite"]
+    models = [m for m in dict.fromkeys([GEMINI_MODEL] + order) if m]
     for model in models:
         url = f"{base}/models/{model}:generateContent"
         for attempt in range(3):
@@ -322,7 +330,7 @@ def process(p):
             # A failed video step is retried on the next run (no half-made post). But a post that keeps failing must not be retried
             # for ever (every retry costs GitHub minutes): once the post is older than VIDEO_RETRY_HOURS we give up on the video
             # and write the item from the caption (+ cover) alone.
-            age_h = (datetime.now(timezone.utc) - parse_time(p["created_time"])).total_seconds() / 3600 if p.get("created_time") else 0.0
+            age_h = age_hours(p)
             if age_h < VIDEO_RETRY_HOURS:
                 log("   video step failed:", safe_err(e), "-> skipped, will retry next run"); return
             log(f"   video step still failing after {age_h:.0f} h:", safe_err(e), "-> giving up on the video, using the caption only")
@@ -331,10 +339,21 @@ def process(p):
     item = None
     try: item = gemini_write(caption, transcript, lang)
     except Exception as e: log("   gemini failed:", safe_err(e))
+    if item is None and GEMINI_KEY:
+        # No model answered at all (rate limit, outage, network). That is not the post's fault: do not turn it into a raw-text draft and
+        # mark it as done. Leave it for the next run, and only after GEMINI_RETRY_HOURS fall back to a draft of the raw text.
+        h = age_hours(p)
+        if h < GEMINI_RETRY_HOURS: log(f"   no AI answer (post is {h:.1f} h old) -> skipped, will retry next run"); return
+        log(f"   still no AI answer after {h:.0f} h -> raw text as DRAFT")
     if item and item.get("skip"):
         log("   editor said: not news -> ignored"); mim("ignore", {"ids": [pid]}); return
     if not quality_ok(item):
-        item = fallback_item(caption, transcript); status = "draft"; log("   using raw text (no/failed AI) -> DRAFT")
+        if item and not item.get("skip") and item.get("_urdu_script") and quality_ok(dict(item, _urdu_script=False)):
+            # Good Roman text with a few Urdu-script words left (names): keep the AI text as a DRAFT, quick to fix by hand, instead of raw Urdu.
+            if item.get("category") not in CATS: item["category"] = "blog"
+            status = "draft"; log("   AI text still has a few Urdu-script words -> DRAFT (AI text kept)")
+        else:
+            item = fallback_item(caption, transcript); status = "draft"; log("   using raw text (no/failed AI) -> DRAFT")
     if kind == "video" and not transcript and not caption: log("   nothing to write from -> ignored"); mim("ignore", {"ids": [pid]}); return
     if env("FORCE_STATUS") == "draft": status = "draft"   # testing only
     payload = {"fb_id": pid, "fb_url": p.get("permalink_url") or "", "date": p.get("created_time") or "", "title": item["title"], "paragraphs": item["paragraphs"],

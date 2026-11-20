@@ -25,6 +25,7 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: read
+  actions: write      # only to switch the other timers back on (see the "Keep the timers switched on" step)
 jobs:
   post:
     runs-on: ubuntu-latest
@@ -43,6 +44,14 @@ jobs:
       REDO_DRAFTS: ${{ inputs.redo_drafts && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Keep the timers switched on
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # In a public repo GitHub switches scheduled workflows (watchdog, token-check) off after 60 days without a commit.
+          # This job is started by cron-job.org, which that rule does not touch, so it switches them back on every time. Harmless when they are already on.
+          for w in watchdog.yml token-check.yml autopost.yml; do gh workflow enable "$w" -R "$GITHUB_REPOSITORY" || echo "(could not enable $w)"; done
       - name: Check for new Facebook posts (cheap)
         id: check
         run: |
