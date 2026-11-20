@@ -7,15 +7,20 @@ on:
         description: "Runs per sample"
         type: string
         default: "4"
+      mode:
+        description: "old, new or both"
+        type: string
+        default: "new"
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNS: ${{ inputs.runs }}
+      MODE: ${{ inputs.mode }}
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m pip install --quiet requests

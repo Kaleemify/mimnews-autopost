@@ -16,7 +16,8 @@ def one(text):
     if item.get("skip"): return "skip"
     return "publishable" if ap.quality_ok(item) else ("urdu_words_left" if item.get("_urdu_script") else "too_thin")
 
-for label, model in (("OLD (lite first, also on retry)", "gemini-flash-lite-latest"), ("NEW (stronger model on retry)", "")):
+MODE = os.environ.get("MODE", "new")   # old | new | both
+for label, model in [m for m in (("OLD (lite first, also on retry)", "gemini-flash-lite-latest"), ("NEW (stronger model on retry)", "")) if MODE == "both" or m[0].lower().startswith(MODE)]:
     ap.GEMINI_MODEL = model
     tally = {}
     for s in samples:
