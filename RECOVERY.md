@@ -44,7 +44,7 @@ Open **https://mimnews.com/wp-json/mim/v1/health**
 ## 6. Built-in safety nets (what already repairs itself)
 - Network / website / Facebook hiccups: retried 4 times with pauses; a failed run is simply repeated 15 minutes later.
 - A video that cannot be read: retried for 3 h, then written from the caption (`VIDEO_RETRY_HOURS`). A silent video goes straight to the caption.
-- Gemini rate limit or outage: the post waits up to 6 h (`GEMINI_RETRY_HOURS`) instead of becoming a raw draft. Four models are tried; a corrective retry starts with the stronger one.
+- Gemini rate limit or outage: the post waits up to 6 h (`GEMINI_RETRY_HOURS`) instead of becoming a raw draft. Four models are tried in order: the fast lite model first (the stronger flash models time out too often to be used first, measured 2026-11-20).
 - Duplicates: the site refuses the same Facebook post twice. Flood guard: 30 posts per hour.
 - Ubuntu package outage: the ffmpeg install is tried 4 times.
 - Dates: posts keep the original Facebook time.

@@ -228,10 +228,9 @@ def _gemini_call(caption, transcript, lang, extra):
             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
     base = env('GEMINI_BASE', 'https://generativelanguage.googleapis.com/v1beta')
     # Model names are retired from time to time (gemini-2.5-* is closed to new keys). Try the configured one first, then the "latest" aliases.
-    # The first attempt uses the cheap "lite" model; a corrective retry (the answer still had Urdu letters) goes to the stronger models first.
-    order = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
-    if extra: order = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.5-flash-lite"]
-    models = [m for m in dict.fromkeys([GEMINI_MODEL] + order) if m]
+    # Always the fast "lite" model first. (Tried 2026-11-20: sending corrective retries to the stronger flash models first made them time out
+    # again and again, 60 s each, so retries became slow and less reliable. They stay in the list only as fallbacks.)
+    models = [m for m in dict.fromkeys([GEMINI_MODEL, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]) if m]
     for model in models:
         url = f"{base}/models/{model}:generateContent"
         for attempt in range(3):
