@@ -57,7 +57,14 @@ jobs:
       - name: Publish new posts
         if: steps.check.outputs.work == 'true'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          # Ubuntu's package servers are sometimes unreachable for a few minutes (it failed a whole run on 2026-11-19):
+          # short timeouts, up to 4 tries with a pause in between, and only then give up.
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          for i in 1 2 3 4; do
+            if sudo apt-get update -qq $APT && sudo apt-get install -y -qq $APT ffmpeg; then break; fi
+            [ "$i" = 4 ] && { echo "ffmpeg could not be installed after 4 tries"; exit 1; }
+            echo "apt failed (try $i of 4), waiting before the next try"; sleep $((i * 20))
+          done
           ffmpeg -version | head -1
           python3 -m pip install --quiet faster-whisper
           python3 autopost.py
