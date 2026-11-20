@@ -1,6 +1,6 @@
 # MIM News autopost — setup (one time, about 20 minutes)
 
-Facebook page post  ->  (every 30 min) GitHub Actions  ->  video download + transcript  ->  Gemini writes a Pinglish news item
+Facebook page post  ->  (every 15 min, started by cron-job.org, see AUTOTRIGGER.md) GitHub Actions  ->  video download + transcript  ->  Gemini writes a Pinglish news item
 ->  website publishes it (category, cover image, Facebook video embed, source link).
 
 Already done by Claude: website receiver (`mu-plugins/mim-autopost.php`), this program, the GitHub repo, the secrets `MIM_KEY`
@@ -21,7 +21,7 @@ Without it, posts are still imported but saved as DRAFT with the raw caption/tra
 
 ## 3. Test, then switch on
 - GitHub repo -> Actions -> **autopost** -> **Run workflow** -> tick **Dry run**. It prints what it would publish and publishes nothing.
-- Untick dry run to run for real. After that it runs by itself every 30 minutes.
+- Untick dry run to run for real. After that it runs by itself every 15 minutes (cron-job.org starts it; GitHub's own timer and the watchdog are the backups).
 
 ## Switches
 - **Stop everything now:** on the server `wp option update mim_autopost_on 0`  (the website refuses new posts).
@@ -29,13 +29,15 @@ Without it, posts are still imported but saved as DRAFT with the raw caption/tra
 - Language hint: variable `WHISPER_LANG` (e.g. `ur`), empty = auto-detect.
 
 ## Safety rules built in
-- Only posts from the last 24 h are published; older unseen ones are ignored (no flood on first run).
-- Max 3 posts per run, max 12 per hour on the server. Same Facebook post is never published twice.
+- Only posts from the last 48 h are published; older unseen ones are ignored (no flood on first run).
+- Max 8 posts per run, max 30 per hour on the server. Same Facebook post is never published twice.
 - Very short text posts ("Eid Mubarak") and non-news are ignored.
 - If Gemini fails or the text looks too thin, the item is saved as DRAFT instead of going live.
 - The AI is told to use only facts from the caption/transcript. Transcripts can be wrong, so keep an eye on the first days.
 
 ## Free-quota note (GitHub Actions)
+UPDATE 2026-11-20: the repository is PUBLIC now, so Actions minutes are unlimited. The numbers below only applied while it was private.
+
 A private repo gets 2,000 free minutes/month. Every scheduled run is billed at least 1 minute, even when nothing is new:
 - every 30 min = ~1,440 min/month for idle checks, leaving ~560 min for videos (a 3-minute video costs ~5 min) -> about 3 videos/day.
 - If you post more videos than that, or want checks every 10 min, make the repo PUBLIC: unlimited minutes, and there are no secrets in the code
