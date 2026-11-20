@@ -40,6 +40,7 @@ GEMINI_KEY = env("GEMINI_API_KEY"); GEMINI_MODEL = env("GEMINI_MODEL", "")
 WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG")
 WINDOW_HOURS = float(env("WINDOW_HOURS", "48")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
+VIDEO_RETRY_HOURS = float(env("VIDEO_RETRY_HOURS", "3"))   # a post whose video keeps failing is retried for this long, then written from the caption
 DRY = env("DRY_RUN") == "1"
 
 def log(*a): print(*a, flush=True)
@@ -318,8 +319,14 @@ def process(p):
                         log("   video has no usable audio -> no transcript, using the caption only")
                     if not image_url and d: image_b64 = frame_b64(path, d * 0.15)
         except Exception as e:
-            # Do not create a half-made post (no transcript) and do not mark it as handled: it is retried on the next run.
-            log("   video step failed:", safe_err(e), "-> skipped, will retry next run"); return
+            # A failed video step is retried on the next run (no half-made post). But a post that keeps failing must not be retried
+            # for ever (every retry costs GitHub minutes): once the post is older than VIDEO_RETRY_HOURS we give up on the video
+            # and write the item from the caption (+ cover) alone.
+            age_h = (datetime.now(timezone.utc) - parse_time(p["created_time"])).total_seconds() / 3600 if p.get("created_time") else 0.0
+            if age_h < VIDEO_RETRY_HOURS:
+                log("   video step failed:", safe_err(e), "-> skipped, will retry next run"); return
+            log(f"   video step still failing after {age_h:.0f} h:", safe_err(e), "-> giving up on the video, using the caption only")
+            transcript, lang = "", ""
     if DRY: log("   [dry] would write + publish"); return
     item = None
     try: item = gemini_write(caption, transcript, lang)
