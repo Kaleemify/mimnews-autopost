@@ -1,0 +1,22 @@
+name: gemini-urdu-test
+# Manual only. Measures how often the news writer leaves Urdu-script words in (see gemini_urdu_test.py).
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Runs per sample"
+        type: string
+        default: "4"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RUNS: ${{ inputs.runs }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet requests
+      - run: python3 gemini_urdu_test.py
