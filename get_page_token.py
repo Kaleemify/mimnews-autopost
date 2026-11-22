@@ -6,7 +6,7 @@ One-time helper: turns a short Facebook user token into a long-lived PAGE token 
 Run it yourself in a terminal (inside the repo folder):   python get_page_token.py
 You will be asked for: App ID, App Secret, and a short-lived user token from Graph API Explorer.
 """
-import getpass, subprocess, sys
+import getpass, re, subprocess, sys
 import requests
 
 G = "https://graph.facebook.com/v21.0"
@@ -27,9 +27,31 @@ def gh_secret(name, value):
     if r.returncode != 0: die(f"could not store {name}: {r.stderr.strip()[:200]}")
     print(f"  stored secret {name}")
 
-app_id = input("App ID: ").strip()
-app_secret = getpass.getpass("App Secret (hidden): ").strip()
-short = getpass.getpass("Short-lived user token from Graph API Explorer (hidden): ").strip()
+def clipboard():
+    try: return subprocess.run(["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"], capture_output=True, text=True, timeout=20).stdout.strip()
+    except Exception: return ""
+
+def ask(label, how, ok, why):
+    """Reads the value from the clipboard (paste into this window does not work for hidden boxes). Never prints the value."""
+    for attempt in range(1, 6):
+        print(); print(">>> " + how)
+        input("    Then press Enter here... ")
+        v = clipboard()
+        if ok(v):
+            print(f"    got the {label} ({len(v)} characters). It is not shown on the screen.")
+            return v
+        print(f"    That does not look like the {label}: {why}. Copy it again.")
+        if attempt == 3:
+            v = getpass.getpass(f"    Or type/paste the {label} here (hidden, nothing appears): ").strip()
+            if ok(v): return v
+    die(f"could not get a valid {label}")
+
+app_id = ask("App ID", "Meta app page (Settings > Basic): COPY the App ID (click its copy icon or select + Ctrl+C).",
+             lambda v: v.isdigit() and 10 <= len(v) <= 20, "it must be only digits, about 15-16 of them")
+app_secret = ask("App secret", "Same page: click Show next to App secret, then COPY the App secret.",
+                 lambda v: re.fullmatch(r"[0-9a-f]{32}", v) is not None, "it must be 32 letters/digits (0-9, a-f)")
+short = ask("token", "Graph API Explorer: after Generate Access Token, COPY the long Access Token from the box at the top.",
+            lambda v: v.startswith("EAA") and len(v) > 60 and not re.search(r"\s", v), "it must start with EAA and be very long, with no spaces")
 
 print("Exchanging for a long-lived token...")
 long_user = get("oauth/access_token", grant_type="fb_exchange_token", client_id=app_id, client_secret=app_secret, fb_exchange_token=short)["access_token"]
@@ -38,7 +60,10 @@ pages = get("me/accounts", access_token=long_user, fields="id,name,access_token"
 if not pages: die("No pages found. Make sure you are an ADMIN of the page and ticked pages_show_list when generating the token.")
 print("\nPages you manage:")
 for i, p in enumerate(pages, 1): print(f"  {i}. {p['name']}  (id {p['id']})")
-n = int(input("\nWhich number is the MIM News page? ").strip())
+mim = [i for i, p in enumerate(pages, 1) if "mim" in p["name"].lower()]
+if len(pages) == 1: n = 1
+elif len(mim) == 1: n = mim[0]; print(f"\nUsing page {n} (the only one with MIM in its name).")
+else: n = int(input("\nWhich number is the MIM News page? ").strip())
 page = pages[n - 1]
 
 # sanity check: can this token read the page's posts?
