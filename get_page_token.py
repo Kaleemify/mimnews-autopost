@@ -46,12 +46,71 @@ def ask(label, how, ok, why):
             if ok(v): return v
     die(f"could not get a valid {label}")
 
-app_id = ask("App ID", "Meta app page (Settings > Basic): COPY the App ID (click its copy icon or select + Ctrl+C).",
-             lambda v: v.isdigit() and 10 <= len(v) <= 20, "it must be only digits, about 15-16 of them")
-app_secret = ask("App secret", "Same page: click Show next to App secret, then COPY the App secret.",
-                 lambda v: re.fullmatch(r"[0-9a-f]{32}", v) is not None, "it must be 32 letters/digits (0-9, a-f)")
-short = ask("token", "Graph API Explorer: after Generate Access Token, COPY the long Access Token from the box at the top.",
-            lambda v: v.startswith("EAA") and len(v) > 60 and not re.search(r"\s", v), "it must start with EAA and be very long, with no spaces")
+def valid_id(v): return v.isdigit() and 10 <= len(v) <= 20
+def valid_secret(v): return re.fullmatch(r"[0-9a-f]{32}", v) is not None
+def valid_token(v): return v.startswith("EAA") and len(v) > 60 and re.search(r"[ \t\r\n]", v) is None
+
+def gui_inputs(hook=None):
+    """A small normal window with 3 boxes (Ctrl+V and a Paste button work there; the black console window does not accept paste).
+    Returns (app_id, app_secret, token), or None if no window can be opened here. Exits if the user closes it. Nothing is printed or saved."""
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+    except Exception:
+        return None
+    root.title("New Facebook token - MIM News autopost")
+    root.resizable(False, False)
+    if hook is None: root.attributes("-topmost", True)
+    spec = [("App ID", False, valid_id, "only digits, about 15-16 of them"),
+            ("App secret", True, valid_secret, "32 letters/digits (0-9, a-f)"),
+            ("Access token", True, valid_token, "starts with EAA, very long, no spaces")]
+    tk.Label(root, text="Copy each value in the browser, then click 'Paste' here (or press Ctrl+V in the box).", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, columnspan=4, padx=12, pady=(12, 6), sticky="w")
+    entries, statuses = [], []
+    go = tk.Button(root, text="Continue", width=14, state="disabled", font=("Segoe UI", 10, "bold"))
+    result = {}
+
+    def refresh(*_):
+        allok = True
+        for (name, _h, ok, why), e, st in zip(spec, entries, statuses):
+            v = e.get().strip()
+            if not v: st.config(text="empty", fg="#888888"); allok = False
+            elif ok(v): st.config(text=f"OK ({len(v)} characters)", fg="#0a7d2a")
+            else: st.config(text="not right: " + why, fg="#b00020"); allok = False
+        go.config(state="normal" if allok else "disabled")
+
+    def paste_into(e):
+        try: txt = root.clipboard_get()
+        except Exception: txt = ""
+        e.delete(0, "end"); e.insert(0, txt.strip()); refresh()
+
+    for i, (name, hidden, ok, why) in enumerate(spec, 1):
+        tk.Label(root, text=name, width=12, anchor="w").grid(row=i * 2 - 1, column=0, padx=(12, 4), pady=(8, 0), sticky="w")
+        e = tk.Entry(root, width=46, show="•" if hidden else "")
+        e.grid(row=i * 2 - 1, column=1, pady=(8, 0)); e.bind("<KeyRelease>", refresh)
+        e.bind("<Control-v>", lambda ev, e=e: (paste_into(e), "break")[1]); e.bind("<Shift-Insert>", lambda ev, e=e: (paste_into(e), "break")[1])
+        menu = tk.Menu(root, tearoff=0); menu.add_command(label="Paste", command=lambda e=e: paste_into(e))
+        e.bind("<Button-3>", lambda ev, m=menu: m.tk_popup(ev.x_root, ev.y_root))
+        tk.Button(root, text="Paste", width=8, command=lambda e=e: paste_into(e)).grid(row=i * 2 - 1, column=2, padx=6, pady=(8, 0))
+        st = tk.Label(root, text="empty", fg="#888888", anchor="w"); st.grid(row=i * 2, column=1, columnspan=3, sticky="w")
+        entries.append(e); statuses.append(st)
+
+    def done():
+        result["v"] = tuple(e.get().strip() for e in entries); root.destroy()
+    go.config(command=done); go.grid(row=7, column=1, pady=14, sticky="w")
+    tk.Button(root, text="Cancel", width=10, command=root.destroy).grid(row=7, column=2, pady=14)
+    entries[0].focus_set()
+    if hook: hook(root, entries, go, refresh)
+    else: root.mainloop()
+    if "v" not in result: die("cancelled: the window was closed")
+    return result["v"]
+
+got = gui_inputs()
+if got: app_id, app_secret, short = got
+else:
+    print("(could not open the small window; using the console way)")
+    app_id = ask("App ID", "Meta app page (Settings > Basic): COPY the App ID.", valid_id, "it must be only digits, about 15-16 of them")
+    app_secret = ask("App secret", "Same page: click Show next to App secret, then COPY the App secret.", valid_secret, "it must be 32 letters/digits (0-9, a-f)")
+    short = ask("token", "Graph API Explorer: COPY the long Access Token from the box at the top.", valid_token, "it must start with EAA and be very long, with no spaces")
 
 print("Exchanging for a long-lived token...")
 long_user = get("oauth/access_token", grant_type="fb_exchange_token", client_id=app_id, client_secret=app_secret, fb_exchange_token=short)["access_token"]

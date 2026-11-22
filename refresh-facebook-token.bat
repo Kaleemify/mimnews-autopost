@@ -21,9 +21,9 @@ start "" "https://developers.facebook.com/apps/"
 start "" "https://developers.facebook.com/tools/explorer/"
 pause
 echo.
-echo  HOW THIS WINDOW WORKS (no pasting needed):
-echo  It will say what to COPY. You copy it in the browser (Ctrl+C), come back here and press Enter.
-echo  The window reads it from the clipboard by itself. 3 times: App ID, App secret, token.
+echo  HOW IT WORKS: after you press a key, a SMALL WINDOW with 3 boxes opens (App ID, App secret, Access token).
+echo  In the browser COPY a value (Ctrl+C), then in the small window click the PASTE button next to that box (or press Ctrl+V).
+echo  A green OK appears when the value looks right. When all 3 are green, click CONTINUE.
 echo.
 python get_page_token.py
 if errorlevel 1 goto failed
