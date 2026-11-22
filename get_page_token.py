@@ -48,7 +48,20 @@ def ask(label, how, ok, why):
 
 def valid_id(v): return v.isdigit() and 10 <= len(v) <= 20
 def valid_secret(v): return re.fullmatch(r"[0-9a-f]{32}", v) is not None
-def valid_token(v): return v.startswith("EAA") and len(v) > 60 and re.search(r"[ \t\r\n]", v) is None
+def clean_token(v):
+    """Forgive what usually goes wrong when copying a token: quotes, spaces/new lines inside it, a leading 'Bearer ', or a whole URL with access_token=..."""
+    v = v.strip().strip("\"'")
+    m = re.search(r"access_token=([^&\s]+)", v) or re.search(r"\"access_token\"\s*:\s*\"([^\"]+)\"", v)
+    if m: v = m.group(1)
+    v = re.sub(r"^bearer\s+", "", v, flags=re.I)
+    return re.sub(r"\s+", "", v)
+def valid_token(v):
+    v = clean_token(v)
+    return len(v) >= 60 and re.fullmatch(r"[A-Za-z0-9_.\-]+", v) is not None
+def token_note(v):
+    """Safe description of a wrong paste: length and the first 3 characters only (never the whole value)."""
+    c = clean_token(v)
+    return f"I see {len(c)} characters starting with '{c[:3]}'. A token is ONE long unbroken text (usually starts with EAA)"
 
 def gui_inputs(hook=None):
     """A small normal window with 3 boxes (Ctrl+V and a Paste button work there; the black console window does not accept paste).
@@ -63,7 +76,7 @@ def gui_inputs(hook=None):
     if hook is None: root.attributes("-topmost", True)
     spec = [("App ID", False, valid_id, "only digits, about 15-16 of them"),
             ("App secret", True, valid_secret, "32 letters/digits (0-9, a-f)"),
-            ("Access token", True, valid_token, "starts with EAA, very long, no spaces")]
+            ("Access token", True, valid_token, None)]
     tk.Label(root, text="Copy each value in the browser, then click 'Paste' here (or press Ctrl+V in the box).", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, columnspan=4, padx=12, pady=(12, 6), sticky="w")
     entries, statuses = [], []
     go = tk.Button(root, text="Continue", width=14, state="disabled", font=("Segoe UI", 10, "bold"))
@@ -74,8 +87,12 @@ def gui_inputs(hook=None):
         for (name, _h, ok, why), e, st in zip(spec, entries, statuses):
             v = e.get().strip()
             if not v: st.config(text="empty", fg="#888888"); allok = False
-            elif ok(v): st.config(text=f"OK ({len(v)} characters)", fg="#0a7d2a")
-            else: st.config(text="not right: " + why, fg="#b00020"); allok = False
+            elif ok(v):
+                is_tok = name == "Access token"
+                n = len(clean_token(v)) if is_tok else len(v)
+                warn = is_tok and not clean_token(v).startswith("EAA")
+                st.config(text=f"OK ({n} characters)" + (" - unusual start; Facebook will say if it is wrong" if warn else ""), fg="#b36b00" if warn else "#0a7d2a")
+            else: st.config(text="not right: " + (token_note(v) if name == "Access token" else why), fg="#b00020"); allok = False
         go.config(state="normal" if allok else "disabled")
 
     def paste_into(e):
@@ -95,7 +112,7 @@ def gui_inputs(hook=None):
         entries.append(e); statuses.append(st)
 
     def done():
-        result["v"] = tuple(e.get().strip() for e in entries); root.destroy()
+        result["v"] = (entries[0].get().strip(), entries[1].get().strip(), clean_token(entries[2].get())); root.destroy()
     go.config(command=done); go.grid(row=7, column=1, pady=14, sticky="w")
     tk.Button(root, text="Cancel", width=10, command=root.destroy).grid(row=7, column=2, pady=14)
     entries[0].focus_set()
