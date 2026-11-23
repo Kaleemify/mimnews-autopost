@@ -59,6 +59,12 @@ if not pages:
         print(f"  {need}: " + ("granted" if need in d.get("scopes", []) else "NOT granted") + (f" | pages chosen in the popup: {len(gs[need])} {gs[need]}" if need in gs else " | no page was chosen in the popup"))
     me = soft("me", access_token=long_user, fields="id,name")
     print("token belongs to the Facebook profile:", me.get("name", me.get("_error")))
+    # The popup chose a page, but /me/accounts is empty: this happens when the page is reached through a business portfolio / task-based access.
+    # Then Facebook can still hand out the page token when we ask for the page by its id.
+    for pid in sorted({t for ids in gs.values() for t in ids}):
+        pg = soft(pid, access_token=long_user, fields="id,name,access_token")
+        print(f"asking Facebook for page {pid} directly ->", pg.get("name") or pg.get("_error") or "no answer", "| token for it:", "yes" if pg.get("access_token") else "no")
+        if pg.get("access_token"): pages.append(pg)
     biz = soft("me/businesses", access_token=long_user, fields="id,name").get("data")
     print("business portfolios visible (needs business_management):", [b.get("name") for b in biz] if biz else "none/not allowed")
     if biz:
