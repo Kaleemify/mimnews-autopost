@@ -20,14 +20,14 @@ def parse_by_shape(text):
     words = re.findall(r"[A-Za-z0-9_.\-]{10,}", text)
     ids = [w for w in words if w.isdigit() and 10 <= len(w) <= 20]
     secrets = [w for w in words if re.fullmatch(r"[0-9a-f]{32}", w)]
-    toks = [w for w in words if w.startswith("EAA") and len(w) > 60]
+    toks = [w for w in words if w.startswith("EA") and len(w) > 60]   # Facebook tokens start EAA..., EAG..., EAB... (depends on the app type)
     return ids, secrets, toks
 
 path = next((p for p in CANDIDATES if os.path.exists(p)), None)
 if not path: die("No credentials file found next to the Waseem folder (looked for .env and .ev).")
 ids, secrets, toks = parse_by_shape(open(path, encoding="utf8", errors="replace").read())
 print(f"Reading {os.path.basename(path)}: found {len(ids)} App ID, {len(secrets)} App secret, {len(toks)} token (values are never shown).")
-for label, found in (("App ID (digits only, 15-16 long)", ids), ("App secret (32 letters/digits 0-9 a-f)", secrets), ("token (starts with EAA, very long)", toks)):
+for label, found in (("App ID (digits only, 15-16 long)", ids), ("App secret (32 letters/digits 0-9 a-f)", secrets), ("token (starts with EA, very long)", toks)):
     if len(found) != 1: die(f"expected exactly one {label} in the file, found {len(found)}.")
 vals = {"id": ids[0], "secret": secrets[0], "token": toks[0]}
 app_id_k, secret_k, token_k = "id", "secret", "token"
