@@ -9,27 +9,28 @@ import requests
 
 REPO = "Kaleemify/mimnews-autopost"
 G = "https://graph.facebook.com/v21.0"
-ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+CANDIDATES = [os.path.join(ROOT, n) for n in (".env", ".ev", ".env.txt", ".ev.txt")]
 
 def die(m): print("ERROR:", m); sys.exit(1)
 
-if not os.path.exists(ENV): die(".env not found next to the Waseem folder.")
-vals = {}
-for line in open(ENV, encoding="utf8"):
-    line = line.strip()
-    if not line or line.startswith("#") or "=" not in line: continue
-    k, v = line.split("=", 1)
-    vals[k.strip().replace("export ", "")] = v.strip().strip('"').strip("'")
-print("Names found in .env:", ", ".join(vals) or "(none)")
+def parse_by_shape(text):
+    """Finds the three values by what they LOOK like, so the file may be written any way (KEY=VALUE, 'Token: ...', 'Client ID 123...').
+    App ID = only digits (10-20); App secret = exactly 32 hex characters; token = starts with EAA and is long. Never prints a value."""
+    words = re.findall(r"[A-Za-z0-9_.\-]{10,}", text)
+    ids = [w for w in words if w.isdigit() and 10 <= len(w) <= 20]
+    secrets = [w for w in words if re.fullmatch(r"[0-9a-f]{32}", w)]
+    toks = [w for w in words if w.startswith("EAA") and len(w) > 60]
+    return ids, secrets, toks
 
-def pick(*patterns):
-    for k in vals:
-        if any(re.search(p, k, re.I) for p in patterns) and vals[k]: return k
-app_id_k = pick(r"APP_?ID", r"CLIENT_?ID"); secret_k = pick(r"APP_?SECRET", r"CLIENT_?SECRET", r"SECRET")
-token_k = pick(r"SHORT.*TOKEN", r"ACCESS_?TOKEN", r"USER.*TOKEN", r"TOKEN")
-for label, k in (("App ID", app_id_k), ("App Secret", secret_k), ("Short token", token_k)):
-    if not k: die(f"Could not find {label} in .env. Rename the key to something like FB_APP_ID / FB_APP_SECRET / FB_SHORT_TOKEN.")
-print(f"Using: app id = {app_id_k}, secret = {secret_k}, token = {token_k}")
+path = next((p for p in CANDIDATES if os.path.exists(p)), None)
+if not path: die("No credentials file found next to the Waseem folder (looked for .env and .ev).")
+ids, secrets, toks = parse_by_shape(open(path, encoding="utf8", errors="replace").read())
+print(f"Reading {os.path.basename(path)}: found {len(ids)} App ID, {len(secrets)} App secret, {len(toks)} token (values are never shown).")
+for label, found in (("App ID (digits only, 15-16 long)", ids), ("App secret (32 letters/digits 0-9 a-f)", secrets), ("token (starts with EAA, very long)", toks)):
+    if len(found) != 1: die(f"expected exactly one {label} in the file, found {len(found)}.")
+vals = {"id": ids[0], "secret": secrets[0], "token": toks[0]}
+app_id_k, secret_k, token_k = "id", "secret", "token"
 
 def get(path, **p):
     r = requests.get(f"{G}/{path}", params=p, timeout=60)
@@ -44,7 +45,8 @@ pages = get("me/accounts", access_token=long_user, fields="id,name,access_token"
 if not pages: die("No pages returned. The token must be generated with pages_show_list and MIM News ticked in the Facebook popup.")
 print("Pages:", " | ".join(f"{p['name']} ({p['id']})" for p in pages))
 mim = [p for p in pages if "mim" in p["name"].lower()]
-if len(mim) != 1: die("Could not pick exactly one MIM page automatically. Run get_page_token.py and choose by number.")
+if len(pages) == 1: mim = pages
+if len(mim) != 1: die("Could not pick exactly one MIM page automatically. Run refresh-facebook-token.bat and choose by number.")
 page = mim[0]
 chk = requests.get(f"{G}/{page['id']}/published_posts", params={"access_token": page["access_token"], "limit": 3, "fields": "id,created_time"}, timeout=60)
 if chk.status_code != 200: die("Page token cannot read posts (pages_read_engagement missing?): " + chk.text[:200])
@@ -53,4 +55,6 @@ for name, value in (("FB_PAGE_ID", page["id"]), ("FB_PAGE_TOKEN", page["access_t
     r = subprocess.run(["gh", "secret", "set", name, "-R", REPO], input=value, text=True, capture_output=True)
     if r.returncode: die(f"could not store {name}: {r.stderr.strip()[:200]}")
     print(f"stored secret {name}")
-print("DONE. You can delete the short token and secret from .env now (they are no longer needed).")
+print(f"DONE. Now delete the file {os.path.basename(path)} (the short token and secret in it are no longer needed).")
+r = subprocess.run(["gh", "api", "-X", "POST", f"repos/{REPO}/actions/workflows/autopost.yml/dispatches", "-f", "ref=main"], capture_output=True, text=True)
+print("autopost started once now; check https://mimnews.com/wp-json/mim/v1/health in 3 minutes ('ok':true)." if r.returncode == 0 else "(could not start the autopost from here; cron-job.org starts it within 15 minutes)")
