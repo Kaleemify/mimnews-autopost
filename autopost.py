@@ -41,7 +41,11 @@ WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG"
 WINDOW_HOURS = float(env("WINDOW_HOURS", "48")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
 VIDEO_RETRY_HOURS = float(env("VIDEO_RETRY_HOURS", "3"))   # a post whose video keeps failing is retried for this long, then written from the caption
-GEMINI_RETRY_HOURS = float(env("GEMINI_RETRY_HOURS", "6")) # if no Gemini model answers at all, the post is retried for this long, then saved as a raw-text draft
+# If NO Gemini model answers at all, the post is left for the next run until it is about to leave the WINDOW_HOURS window, and only then saved as a raw-text draft.
+# (The first version measured the post's age against 6 h; during a backlog every old post then became a raw Urdu draft at the first Gemini hiccup, 2026-11-23.)
+GEMINI_RETRY_HOURS = float(env("GEMINI_RETRY_HOURS", str(max(1.0, WINDOW_HOURS - 2))))
+class GeminiDown(Exception):
+    """Gemini did not answer at all: the rest of this run would fail the same way, so the run stops and every unfinished post waits for the next run."""
 DRY = env("DRY_RUN") == "1"
 
 def log(*a): print(*a, flush=True)
@@ -342,7 +346,7 @@ def process(p):
         # No model answered at all (rate limit, outage, network). That is not the post's fault: do not turn it into a raw-text draft and
         # mark it as done. Leave it for the next run, and only after GEMINI_RETRY_HOURS fall back to a draft of the raw text.
         h = age_hours(p)
-        if h < GEMINI_RETRY_HOURS: log(f"   no AI answer (post is {h:.1f} h old) -> skipped, will retry next run"); return
+        if h < GEMINI_RETRY_HOURS: log(f"   no AI answer (post is {h:.1f} h old) -> not saved, will retry in the next run"); raise GeminiDown()
         log(f"   still no AI answer after {h:.0f} h -> raw text as DRAFT")
     if item and item.get("skip"):
         log("   editor said: not news -> ignored"); mim("ignore", {"ids": [pid]}); return
@@ -387,6 +391,7 @@ def main():
     for p in fresh[:MAX_PER_RUN]:
         try: process(p)
         except SystemExit: raise
+        except GeminiDown: log("Gemini is not answering right now: stopping this run. Every unfinished post waits for the next run (nothing is lost)."); break
         except Exception as e: log("   FAILED:", safe_err(e))
     if len(fresh) > MAX_PER_RUN: log(f"{len(fresh) - MAX_PER_RUN} more waiting for the next run")
 
