@@ -14,5 +14,5 @@ jobs:
       FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m pip install --quiet requests
+      - run: python3 -m pip install --quiet requests==2.34.2
       - run: python3 token_check.py

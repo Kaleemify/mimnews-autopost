@@ -20,6 +20,10 @@ on:
         description: "Posts to handle in this run (empty = 8)"
         type: string
         default: ""
+      window_hours:
+        description: "Only posts newer than this many hours are published (empty = 96)."
+        type: string
+        default: ""
 concurrency:
   group: autopost
   cancel-in-progress: false
@@ -29,7 +33,7 @@ permissions:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
       FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
@@ -41,6 +45,7 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
       BACKFILL: ${{ inputs.backfill && '1' || '' }}
       MAX_PER_RUN: ${{ inputs.max_posts }}
+      WINDOW_HOURS: ${{ inputs.window_hours }}
       REDO_DRAFTS: ${{ inputs.redo_drafts && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +60,7 @@ jobs:
       - name: Check for new Facebook posts (cheap)
         id: check
         run: |
-          python3 -m pip install --quiet requests
+          python3 -m pip install --quiet requests==2.34.2
           python3 autopost.py --check
       - name: Cache Whisper model
         if: steps.check.outputs.work == 'true'
@@ -75,5 +80,7 @@ jobs:
             echo "apt failed (try $i of 4), waiting before the next try"; sleep $((i * 20))
           done
           ffmpeg -version | head -1
-          python3 -m pip install --quiet faster-whisper
+          # versions pinned to the ones every successful run used, so a new release can never break the pipeline overnight
+          python3 -m pip install --quiet faster-whisper==1.2.1 requests==2.34.2
+          python3 -m pip freeze | grep -i -E "^(faster-whisper|ctranslate2|onnxruntime|av|tokenizers|numpy|huggingface-hub|requests)==" || true
           python3 autopost.py

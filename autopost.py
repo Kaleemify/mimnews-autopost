@@ -16,7 +16,7 @@ Environment (GitHub Secrets / variables):
   GEMINI_API_KEY              optional; without it items are saved as DRAFT with the raw caption/transcript
   GEMINI_MODEL                optional; default tries gemini-flash-lite-latest, gemini-flash-latest, gemini-3.5-flash-lite, gemini-3.5-flash
   WHISPER_MODEL               default small      WHISPER_LANG  optional (e.g. ur); empty = auto-detect
-  WINDOW_HOURS                default 48   only posts newer than this are published; older unseen ones are ignored
+  WINDOW_HOURS                default 96   only posts newer than this are published; older unseen ones are ignored
   MAX_PER_RUN                 default 3
   MAX_VIDEO_MIN               default 15   longer videos: no transcript (caption only)
   MIN_TEXT_CHARS              default 30   text-only posts shorter than this are ignored
@@ -38,12 +38,13 @@ FB_PAGE_ID = env("FB_PAGE_ID"); FB_TOKEN = env("FB_PAGE_TOKEN")
 MIM_KEY = env("MIM_KEY"); MIM_URL = env("MIM_URL", "https://mimnews.com").rstrip("/")
 GEMINI_KEY = env("GEMINI_API_KEY"); GEMINI_MODEL = env("GEMINI_MODEL", "")
 WHISPER_MODEL = env("WHISPER_MODEL", "small"); WHISPER_LANG = env("WHISPER_LANG")
-WINDOW_HOURS = float(env("WINDOW_HOURS", "48")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
+WINDOW_HOURS = float(env("WINDOW_HOURS", "96")); MAX_PER_RUN = int(env("MAX_PER_RUN", "8"))
 MAX_VIDEO_MIN = float(env("MAX_VIDEO_MIN", "15")); MIN_TEXT = int(env("MIN_TEXT_CHARS", "30"))
 VIDEO_RETRY_HOURS = float(env("VIDEO_RETRY_HOURS", "3"))   # a post whose video keeps failing is retried for this long, then written from the caption
 # If NO Gemini model answers at all, the post is left for the next run until it is about to leave the WINDOW_HOURS window, and only then saved as a raw-text draft.
 # (The first version measured the post's age against 6 h; during a backlog every old post then became a raw Urdu draft at the first Gemini hiccup, 2026-11-23.)
 GEMINI_RETRY_HOURS = float(env("GEMINI_RETRY_HOURS", str(max(1.0, WINDOW_HOURS - 2))))
+RUN_BUDGET_MIN = float(env("RUN_BUDGET_MIN", "25"))        # no NEW post is started after this many minutes, so the job ends cleanly before its time limit
 class GeminiDown(Exception):
     """Gemini did not answer at all: the rest of this run would fail the same way, so the run stops and every unfinished post waits for the next run."""
 DRY = env("DRY_RUN") == "1"
@@ -367,6 +368,15 @@ def process(p):
     log(f"   -> {j.get('status') or j}  {j.get('link', '')}  cover={j.get('has_cover')}")
     if code in (423, 429): raise SystemExit(0)
 
+def report_status(result, detail=""):
+    """Tell the website how this run ended ("ok" or a problem name). Best effort: it must never break the run. The website turns /health red
+    when one problem lasts more than 90 minutes, which also catches the silent case where runs succeed but nothing gets published."""
+    if DRY: return
+    try: mim("status", {"result": result, "detail": str(detail)[:160]}, timeout=30)
+    except Exception: pass
+
+TOKEN_WORDS = re.compile(r"access token|oauthexception|session has been invalidated|\(#190\)|error validating|token.*expired|expired.*token", re.I)
+
 def main():
     miss = [k for k, v in (("FB_PAGE_ID", FB_PAGE_ID), ("FB_PAGE_TOKEN", FB_TOKEN), ("MIM_KEY", MIM_KEY)) if not v]
     if miss:
@@ -378,9 +388,17 @@ def main():
             return
         log("missing settings:", ", ".join(miss)); sys.exit(2)
     try: fresh, enabled = new_posts()
-    except Exception as e: log("check failed:", safe_err(e)); sys.exit(1)
+    except Exception as e:
+        msg = safe_err(e); log("check failed:", msg)
+        if TOKEN_WORDS.search(msg):
+            log("::error::FACEBOOK TOKEN PROBLEM: the page token no longer works (password change, access removed, or Facebook security reset). "
+                "FIX: double-click autopost\\setup-facebook.bat or refresh-facebook-token.bat (see RECOVERY.md). Nothing is lost: posts of the last 48 h are caught up after the fix.")
+            report_status("facebook_token", msg)
+        else: report_status("check_failed", msg)
+        sys.exit(1)
     work = bool(fresh) and enabled
     if "--check" in sys.argv:
+        if not fresh and enabled: report_status("ok")      # nothing is waiting, so nothing can be stuck
         log(f"new posts: {len(fresh)}")
         for p in fresh: log(f"   queue: [{post_kind(p)[0]}] {(p.get('message') or '').strip()[:70]!r} ({p['created_time'][:16]})")
         out = os.environ.get("GITHUB_OUTPUT")
@@ -388,12 +406,16 @@ def main():
             with open(out, "a") as f: f.write(f"work={'true' if work else 'false'}\n")
         return
     if not fresh: log("nothing new")
+    t0 = time.time(); gemini_down = False; failed = 0; last_err = ""; done = 0
     for p in fresh[:MAX_PER_RUN]:
-        try: process(p)
+        if (time.time() - t0) / 60 > RUN_BUDGET_MIN:
+            log(f"time budget of {RUN_BUDGET_MIN:g} min used: not starting more posts in this run, the rest waits for the next run"); break
+        try: process(p); done += 1
         except SystemExit: raise
-        except GeminiDown: log("Gemini is not answering right now: stopping this run. Every unfinished post waits for the next run (nothing is lost)."); break
-        except Exception as e: log("   FAILED:", safe_err(e))
+        except GeminiDown: gemini_down = True; log("Gemini is not answering right now: stopping this run. Every unfinished post waits for the next run (nothing is lost)."); break
+        except Exception as e: failed += 1; last_err = safe_err(e); log("   FAILED:", last_err)
     if len(fresh) > MAX_PER_RUN: log(f"{len(fresh) - MAX_PER_RUN} more waiting for the next run")
+    report_status("gemini_down" if gemini_down else ("post_errors" if failed else "ok"), "no Gemini model answered" if gemini_down else (f"{failed} post(s) failed: {last_err}" if failed else ""))
 
 if __name__ == "__main__":
     main()

@@ -23,7 +23,7 @@ Open **https://mimnews.com/wp-json/mim/v1/health**
 | runs are red with `exit code 100` / `Failed to fetch ... ubuntu.com` | Ubuntu package servers unreachable | Nothing: the install is tried 4 times and the next run tries again. |
 | runs are red at "Check for new Facebook posts" with `Error validating access token: The session has been invalidated because the user changed their password ...` (this happened on 2026-11-20 at ~12:15 UTC) | the Facebook token is tied to the personal profile that made it; changing that profile's password or Facebook's own security reset kills it | **Double-click `refresh-facebook-token.bat`** (opens the 2 Facebook pages, then asks for App ID, App secret and the new token). It stores the new secrets and starts a run. Do not change that Facebook password / use "log out of all devices" without running it again afterwards. |
 | posts appear as drafts with Urdu text | Gemini left Urdu-script words, or no model answered for 6 h | Edit the draft in WordPress (change the few Urdu words to Roman letters) and publish, or trash it. Trashed items are rebuilt by the next run when started with `redo_drafts`. |
-| a post is missing on the site | it was judged "not news" / a campaign post / too short (the run log says so), or it is older than 48 h | Actions > autopost > run log: look for the Facebook id. To re-check ignored posts start the workflow with `backfill` ticked. |
+| a post is missing on the site | it was judged "not news" / a campaign post / too short (the run log says so), or it is older than 96 h (after a long outage) | Actions > autopost > run log: look for the Facebook id. To re-check ignored posts start the workflow with `backfill` ticked. |
 | nothing publishes, runs say `website says autopost is switched off` | the site switch `mim_autopost_on` is 0 | On the server: `wp option update mim_autopost_on 1`. |
 | GitHub says minutes are used up | only possible if the repo is private again (public repos have no minute limit) | Keep the repo public, or set cron-job.org to 30 min. |
 | the watchdog / token-check never run any more | GitHub switches scheduled workflows off after 60 days without a commit in a public repo | Every autopost run already switches them back on. If it does not: Actions tab > pick the workflow > "Enable workflow". |
@@ -49,6 +49,10 @@ Open **https://mimnews.com/wp-json/mim/v1/health**
 - Duplicates: the site refuses the same Facebook post twice. Flood guard: 30 posts per hour.
 - Ubuntu package outage: the ffmpeg install is tried 4 times.
 - Dates: posts keep the original Facebook time.
+- Window: posts up to 96 h old are caught up after an outage (it was 48 h; the 72 h outage of 20-23 Nov lost a day of news). Older ones are ignored on purpose.
+- Silent failures: after every run the autopost tells the site how it ended (`ok`, `gemini_down`, `post_errors`, `facebook_token`, `check_failed`). `/health` turns red (503) when ONE such problem lasts more than 90 minutes, so a dead Gemini key or a dead Facebook token reaches the alarm e-mail even when runs look green. `problem`, `problem_detail` and `problem_min` are shown in /health.
+- Time budget: no new post is started after 25 minutes in a run (job limit 50 min), so a run ends cleanly.
+- Versions of faster-whisper and requests are pinned; the log prints `pip freeze` of the key libraries.
 
 ## 7. Limits nobody can remove
 - If the client removes page access from the profile that made the token, or Facebook disables the page / app, the autopost cannot read posts.
