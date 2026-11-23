@@ -286,7 +286,9 @@ def new_posts():
     seen = set(j.get("seen", []))
     cutoff = datetime.now(timezone.utc) - timedelta(hours=WINDOW_HOURS)
     fresh, old = [], []
-    for p in sorted(feed, key=lambda x: x["created_time"]):
+    # NEWEST FIRST: today's news must never wait behind an old backlog (the site shows every post under its own Facebook time anyway,
+    # so the order of making them does not change the order readers see). Changed on 2026-11-23 after 6 fresh posts sat behind 59 old ones.
+    for p in sorted(feed, key=lambda x: x["created_time"], reverse=True):
         if p["id"] in seen: continue
         (fresh if parse_time(p["created_time"]) >= cutoff else old).append(p)
     if old and not DRY:
