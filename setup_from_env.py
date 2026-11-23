@@ -41,8 +41,37 @@ def get(path, **p):
     return r.json()
 
 long_user = get("oauth/access_token", grant_type="fb_exchange_token", client_id=vals[app_id_k], client_secret=vals[secret_k], fb_exchange_token=vals[token_k])["access_token"]
+def soft(path, **p):
+    """Like get() but never stops the script: returns {} on any error."""
+    try:
+        r = requests.get(f"{G}/{path}", params=p, timeout=60)
+        return r.json() if r.status_code == 200 else {"_error": (r.json().get("error") or {}).get("message", "")[:160]}
+    except Exception as e: return {"_error": type(e).__name__}
+
 pages = get("me/accounts", access_token=long_user, fields="id,name,access_token", limit=100).get("data", [])
-if not pages: die("No pages returned. The token must be generated with pages_show_list and MIM News ticked in the Facebook popup.")
+if not pages:
+    # Explain WHY (prints permission names and page ids only, never a token or secret).
+    d = soft("debug_token", input_token=long_user, access_token=f"{vals[app_id_k]}|{vals[secret_k]}").get("data", {})
+    gs = {g.get("scope"): g.get("target_ids", []) for g in d.get("granular_scopes", [])}
+    print("\n--- WHY NO PAGES? (what Facebook says about this token) ---")
+    print("token valid:", d.get("is_valid"), "| type:", d.get("type"), "| scopes granted:", ", ".join(d.get("scopes", [])) or "(none)")
+    for need in ("pages_show_list", "pages_read_engagement"):
+        print(f"  {need}: " + ("granted" if need in d.get("scopes", []) else "NOT granted") + (f" | pages chosen in the popup: {len(gs[need])} {gs[need]}" if need in gs else " | no page was chosen in the popup"))
+    me = soft("me", access_token=long_user, fields="id,name")
+    print("token belongs to the Facebook profile:", me.get("name", me.get("_error")))
+    biz = soft("me/businesses", access_token=long_user, fields="id,name").get("data")
+    print("business portfolios visible (needs business_management):", [b.get("name") for b in biz] if biz else "none/not allowed")
+    if biz:
+        for b in biz:
+            for edge in ("owned_pages", "client_pages"):
+                found = soft(f"{b['id']}/{edge}", access_token=long_user, fields="id,name,access_token", limit=100).get("data", [])
+                for pg in found:
+                    if pg.get("access_token"): pages.append(pg)
+        if pages: print("found page(s) through the business portfolio:", ", ".join(p["name"] for p in pages))
+    if not pages:
+        print("\nMEANING: if 'no page was chosen' -> in the Facebook popup tick MIM News (Edit settings / choose pages) and make a NEW token.")
+        print("         if a page WAS chosen but still nothing -> this profile has no role on the page any more: the client must give it Full control (Meta Business Suite > Settings > Pages > People).")
+        die("No pages returned for this token (see the explanation above).")
 print("Pages:", " | ".join(f"{p['name']} ({p['id']})" for p in pages))
 mim = [p for p in pages if "mim" in p["name"].lower()]
 if len(pages) == 1: mim = pages
